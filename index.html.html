@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TradeIntel — US30 Morning Brief</title>
+  <meta name="description" content="AI-powered US30 morning brief, journal, and risk calculator for futures day traders."/>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23f59e0b'/><text y='.9em' font-size='72' font-family='serif' font-weight='900' fill='%23030711' x='10'>T</text></svg>"/>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { margin: 0; background: #030711; }
+    #root { min-height: 100vh; }
+    #splash {
+      position: fixed; inset: 0; background: #030711;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; z-index: 9999;
+      font-family: sans-serif; color: #445f82;
+      transition: opacity 0.4s ease;
+    }
+    #splash .logo {
+      width: 48px; height: 48px; background: #f59e0b; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px; font-weight: 900; color: #030711;
+      margin-bottom: 20px; box-shadow: 0 0 20px rgba(245,158,11,0.4);
+    }
+    #splash .bar {
+      width: 160px; height: 3px; background: #1a2540; border-radius: 2px; overflow: hidden;
+    }
+    #splash .bar-fill {
+      height: 100%; background: #f59e0b; border-radius: 2px;
+      animation: load 1.2s ease forwards;
+    }
+    @keyframes load { from{width:0} to{width:100%} }
+  </style>
+</head>
+<body>
+  <div id="splash">
+    <div class="logo">TI</div>
+    <div style="font-size:12px;margin-bottom:16px;letter-spacing:0.1em;text-transform:uppercase;">Loading TradeIntel</div>
+    <div class="bar"><div class="bar-fill"></div></div>
+  </div>
+  <div id="root"></div>
+
+<script type="text/babel">
+// ─── Shim: replace window.storage with localStorage ──────────────────────────
+async function localStorageGet(key) {
+  try {
+    const val = localStorage.getItem(key);
+    return val ? { value: val } : null;
+  } catch { return null; }
+}
+async function localStorageSet(key, value) {
+  try { localStorage.setItem(key, value); return true; } catch { return null; }
+}
+
+const { useState, useEffect, useRef } = React;
+
+// ─── DESIGN: "War Room Terminal" ─────────────────────────────────────────────
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:    #030711;
+  --s1:    #080e1c;
+  --s2:    #0d1525;
+  --s3:    #12192e;
+  --s4:    #1a2540;
+  --border:#1e2d47;
+  --brd2:  #283d5e;
+  --accent:#f59e0b;
+  --acc2:  #fbbf24;
+  --adim:  rgba(245,158,11,0.12);
+  --adim2: rgba(245,158,11,0.06);
+  --text:  #e4eeff;
+  --text2: #8ba3c7;
+  --text3: #445f82;
+  --text4: #2a3f5e;
+  --green: #22d3a0;
+  --gdim:  rgba(34,211,160,0.1);
+  --gdim2: rgba(34,211,160,0.05);
+  --red:   #f06060;
+  --rdim:  rgba(240,96,96,0.1);
+  --rdim2: rgba(240,96,96,0.05);
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.mono    { font-family: 'IBM Plex Mono', monospace; }
+.display { font-family: 'Bebas Neue', cursive; letter-spacing: 0.04em; }
+
+input, textarea, select {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 9px 13px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--adim2);
+}
+input::placeholder, textarea::placeholder { color: var(--text3); }
+select option { background: var(--s2); }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  background: var(--s4);
+  height: 4px; border-radius: 2px;
+  padding: 0; border: none; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 17px; height: 17px;
+  background: var(--accent);
+  border-radius: 50%; cursor: pointer;
+  box-shadow: 0 0 8px rgba(245,158,11,0.4);
+}
+
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--brd2); border-radius: 2px; }
+
+@keyframes fadeUp  { from{opacity:0;transform:translateY(10px);} to{opacity:1;transform:translateY(0);} }
+@keyframes fadeIn  { from{opacity:0;} to{opacity:1;} }
+@keyframes blink   { 0%,100%{opacity:1;} 50%{opacity:0;} }
+@keyframes spin    { to{transform:rotate(360deg);} }
+@keyframes shimmer { 0%{background-position:-200% 0;} 100%{background-position:200% 0;} }
+@keyframes pulse   { 0%,100%{opacity:1;} 50%{opacity:0.55;} }
+
+.fade-up    { animation: fadeUp  0.3s ease forwards; }
+.fade-in    { animation: fadeIn  0.25s ease forwards; }
+.blink      { animation: blink   1.1s infinite; }
+.spin       { animation: spin    0.8s linear infinite; }
+.pulse-slow { animation: pulse   2.2s ease infinite; }
+
+.shimmer {
+  background: linear-gradient(90deg, var(--s2) 25%, var(--s3) 50%, var(--s2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 6px;
+}
+
+.tag {
+  display: inline-flex; align-items: center;
+  padding: 2px 9px; border-radius: 4px;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.07em; text-transform: uppercase;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.tag-win   { background:var(--gdim); color:var(--green); }
+.tag-loss  { background:var(--rdim); color:var(--red); }
+.tag-be    { background:var(--adim); color:var(--accent); }
+.tag-long  { background:var(--gdim); color:var(--green); }
+.tag-short { background:var(--rdim); color:var(--red); }
+.tag-high  { background:var(--rdim); color:var(--red); }
+.tag-medium{ background:var(--adim); color:var(--accent); }
+.tag-low   { background:var(--s4);   color:var(--text3); }
+
+.btn {
+  padding: 9px 17px; border-radius: 7px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px; font-weight: 500;
+  cursor: pointer; border: none;
+  transition: all 0.15s; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.btn-primary { background:var(--accent); color:#030711; font-weight:600; }
+.btn-primary:hover:not(:disabled) { background:var(--acc2); transform:translateY(-1px); box-shadow:0 4px 14px rgba(245,158,11,0.25); }
+.btn-primary:disabled { opacity:0.4; cursor:not-allowed; }
+.btn-ghost  { background:transparent; color:var(--text2); border:1px solid var(--border); }
+.btn-ghost:hover:not(:disabled) { border-color:var(--brd2); color:var(--text); }
+.btn-ghost:disabled { opacity:0.4; cursor:not-allowed; }
+.btn-active { background:var(--adim); color:var(--accent); border:1px solid rgba(245,158,11,0.3); }
+
+.card       { background:var(--s1); border:1px solid var(--border); border-radius:12px; padding:20px; }
+.card-inner { background:var(--s2); border:1px solid var(--border); border-radius:9px; padding:14px; }
+.lbl        { color:var(--text3); font-size:10px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; font-family:'IBM Plex Mono',monospace; }
+
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(30,45,71,0.28) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30,45,71,0.28) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.bs1 { animation: fadeUp 0.3s 0.05s ease both; }
+.bs2 { animation: fadeUp 0.3s 0.12s ease both; }
+.bs3 { animation: fadeUp 0.3s 0.20s ease both; }
+.bs4 { animation: fadeUp 0.3s 0.28s ease both; }
+.bs5 { animation: fadeUp 0.3s 0.36s ease both; }
+.bs6 { animation: fadeUp 0.3s 0.44s ease both; }
+
+.bias-bull { border-color:rgba(34,211,160,0.25)!important; background:linear-gradient(135deg,rgba(34,211,160,0.07),var(--s1))!important; }
+.bias-bear { border-color:rgba(240,96,96,0.25)!important;  background:linear-gradient(135deg,rgba(240,96,96,0.07),var(--s1))!important; }
+.bias-conf { border-color:rgba(245,158,11,0.25)!important; background:linear-gradient(135deg,rgba(245,158,11,0.07),var(--s1))!important; }
+
+.scenario-card {
+  background:var(--s2); border:1px solid var(--border);
+  border-radius:11px; padding:18px; flex:1; min-width:0;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+.scenario-card:hover { transform:translateY(-2px); border-color:var(--brd2); box-shadow:0 8px 20px rgba(0,0,0,0.3); }
+
+.level-row {
+  display:flex; align-items:center; gap:10px; padding:9px 12px;
+  border-radius:7px; background:var(--s2); border:1px solid var(--border);
+  margin-bottom:6px; transition:border-color 0.15s;
+}
+.level-row:hover { border-color:var(--brd2); }
+
+.event-row {
+  display:flex; align-items:flex-start; gap:10px;
+  padding:10px 0; border-bottom:1px solid var(--border);
+}
+.event-row:last-child { border-bottom:none; }
+
+.checklist-item {
+  display:flex; align-items:flex-start; gap:10px;
+  padding:9px 10px; border-radius:7px; cursor:pointer;
+  transition:background 0.15s;
+}
+.checklist-item:hover { background:var(--s2); }
+.checklist-item.done { opacity:0.42; }
+`;
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function fmt(text) {
+  if (!text) return null;
+  return text.split('\n').map((line, i) => {
+    if (!line.trim()) return <div key={i} style={{height:'0.4rem'}}/>;
+    const isBullet = /^[-*•]\s+/.test(line);
+    const isH2 = line.startsWith('## ');
+    const isH3 = line.startsWith('### ');
+    const isH1 = line.startsWith('# ');
+    const raw = isBullet?line.replace(/^[-*•]\s+/,''):isH1?line.slice(2):isH2?line.slice(3):isH3?line.slice(4):line;
+    const parts = raw.split(/(\*\*[^*]+\*\*)/g).map((p,j) =>
+      p.startsWith('**')&&p.endsWith('**')
+        ?<strong key={j} style={{color:'var(--accent)',fontWeight:600}}>{p.slice(2,-2)}</strong>:p
+    );
+    if (isH1) return <div key={i} style={{color:'var(--text)',fontSize:'0.95rem',fontWeight:700,marginTop:'1rem',marginBottom:'0.35rem'}}>{parts}</div>;
+    if (isH2) return <div key={i} style={{color:'var(--accent)',fontSize:'0.75rem',fontWeight:600,marginTop:'0.9rem',marginBottom:'0.35rem',textTransform:'uppercase',letterSpacing:'0.08em',fontFamily:"'IBM Plex Mono'"}}>{parts}</div>;
+    if (isH3) return <div key={i} style={{color:'var(--text)',fontSize:'0.82rem',fontWeight:600,marginTop:'0.6rem',marginBottom:'0.3rem'}}>{parts}</div>;
+    if (isBullet) return (
+      <div key={i} style={{display:'flex',gap:'8px',marginBottom:'0.3rem',alignItems:'flex-start'}}>
+        <span style={{color:'var(--accent)',flexShrink:0,marginTop:'3px',fontSize:'9px'}}>▸</span>
+        <span style={{color:'var(--text2)',lineHeight:'1.65',fontSize:'13px'}}>{parts}</span>
+      </div>
+    );
+    return <div key={i} style={{color:'var(--text2)',lineHeight:'1.7',fontSize:'13px',marginBottom:'0.25rem'}}>{parts}</div>;
+  });
+}
+
+async function callClaude(prompt, webSearch=false, system='') {
+  const body = { model:"claude-sonnet-4-20250514", max_tokens:1200, messages:[{role:"user",content:prompt}] };
+  if (system) body.system = system;
+  if (webSearch) body.tools = [{type:"web_search_20250305",name:"web_search"}];
+  const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.content.filter(b=>b.type==="text").map(b=>b.text).join("\n");
+}
+
+function extractJSON(text) {
+  const jb = text.match(/```json\s*([\s\S]*?)```/);
+  if (jb) { try{return JSON.parse(jb[1].trim());}catch{} }
+  const cb = text.match(/```\s*([\s\S]*?)```/);
+  if (cb) { try{return JSON.parse(cb[1].trim());}catch{} }
+  const obj = text.match(/\{[\s\S]*\}/);
+  if (obj) { try{return JSON.parse(obj[0]);}catch{} }
+  throw new Error("Could not parse AI response as JSON. Try again.");
+}
+
+async function loadTrades() { try{const r=await localStorageGet('ti-trades-v2');return r?JSON.parse(r.value):[];}catch{return[];} }
+async function saveTrades(t) { try{await localStorageSet('ti-trades-v2',JSON.stringify(t));}catch(e){console.error(e);} }
+async function loadBrief()   { try{const r=await localStorageGet('ti-brief-v2');if(!r)return null;const{brief,date}=JSON.parse(r.value);return date===new Date().toDateString()?brief:null;}catch{return null;} }
+async function saveBrief(b)  { try{await localStorageSet('ti-brief-v2',JSON.stringify({brief:b,date:new Date().toDateString()}));}catch(e){console.error(e);} }
+
+// ─── Time ─────────────────────────────────────────────────────────────────────
+function getETTime() { return new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'})); }
+function getSecsToOpen() {
+  const et=getETTime();
+  const target=new Date(et); target.setHours(9,30,0,0);
+  if(et>=target) target.setDate(target.getDate()+1);
+  while(target.getDay()===0||target.getDay()===6) target.setDate(target.getDate()+1);
+  return Math.max(0,Math.floor((target-et)/1000));
+}
+function fmtCountdown(s) {
+  if(s<=0) return 'LIVE';
+  const d=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60),sec=s%60;
+  if(d>0) return `${d}d ${h}h ${String(m).padStart(2,'0')}m`;
+  if(h>0) return `${h}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`;
+  return `${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`;
+}
+function isMarketOpen() { const et=getETTime(); const t=et.getHours()*3600+et.getMinutes()*60+et.getSeconds(); const day=et.getDay(); return day>=1&&day<=5&&t>=34200&&t<57600; }
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+const INSTRUMENTS = [
+  {id:'YM', name:'Dow Futures (US30)',   tick:1,       tickVal:5.00},
+  {id:'MYM',name:'Micro Dow (US30)',     tick:1,       tickVal:0.50},
+  {id:'ES', name:'E-mini S&P 500',       tick:0.25,    tickVal:12.50},
+  {id:'MES',name:'Micro E-mini S&P',     tick:0.25,    tickVal:1.25},
+  {id:'NQ', name:'E-mini Nasdaq 100',    tick:0.25,    tickVal:5.00},
+  {id:'MNQ',name:'Micro E-mini Nasdaq',  tick:0.25,    tickVal:0.50},
+  {id:'RTY',name:'E-mini Russell 2000',  tick:0.10,    tickVal:5.00},
+  {id:'CL', name:'Crude Oil (WTI)',       tick:0.01,    tickVal:10.00},
+  {id:'GC', name:'Gold',                 tick:0.10,    tickVal:10.00},
+];
+const RESEARCH_PRESETS = [
+  {label:'COT Report',     icon:'📋', q:'Summarize the latest COT (Commitments of Traders) report for Dow/YM futures. What are commercial hedgers vs large speculators doing? What does positioning signal for near-term US30 direction?'},
+  {label:'Fed & Rates',    icon:'🏦', q:'What is the current Federal Reserve stance? Summarize recent FOMC minutes, rate decisions, and Fed speeches. How does the current rate environment affect US30/Dow Jones futures?'},
+  {label:'Econ Calendar',  icon:'📅', q:'What are the most important US economic data releases for the next 5 trading days? Include date, time (ET), and why each event specifically matters for Dow/US30 day traders.'},
+  {label:'Dow Components', icon:'🏭', q:'Are any major Dow 30 component stocks reporting earnings or facing major news this week? Which individual Dow stocks could cause outsized moves in the index?'},
+  {label:'Index Outlook',  icon:'📈', q:'Current macro and technical outlook for the Dow Jones (US30/YM). Recent price action, VIX, key support/resistance, breadth, sector rotation, and major upcoming catalysts.'},
+  {label:'Dollar & Bonds', icon:'💵', q:'What is the US Dollar Index (DXY) and 10-year Treasury yield doing right now? How is this affecting US equity index futures and specifically the Dow Jones?'},
+];
+const CHECKLIST = [
+  'Reviewed overnight summary and global markets',
+  'Identified key levels on US30 chart',
+  'Set alerts at resistance and support levels',
+  "Know today's exact economic event times",
+  'Chosen primary scenario for the open',
+  'Set max daily loss in risk calculator',
+  'Platform logged in, data feed confirmed',
+  'Phone away — zero distractions during session',
+];
+const LOAD_STEPS = [
+  'Scanning overnight US30/YM futures...',
+  'Checking global market conditions...',
+  "Pulling today's economic calendar...",
+  'Identifying key price levels...',
+  'Building opening scenarios...',
+  'Finalising your brief...',
+];
+
+// ─── Countdown Widget ─────────────────────────────────────────────────────────
+function CountdownWidget() {
+  const [secs,setSecs] = useState(getSecsToOpen());
+  const open = isMarketOpen();
+  const urgent = secs<3600&&secs>0;
+  useEffect(()=>{const id=setInterval(()=>setSecs(getSecsToOpen()),1000);return()=>clearInterval(id);},[]);
+  const et = getETTime();
+  return (
+    <div style={{textAlign:'center'}}>
+      <div className="lbl" style={{marginBottom:'6px'}}>{open?'Market Status':'Next Open'}</div>
+      <div className="display" style={{
+        fontSize:'48px',lineHeight:1,
+        color:open?'var(--green)':urgent?'var(--accent)':'var(--text)',
+        textShadow:open?'0 0 30px rgba(34,211,160,0.45)':urgent?'0 0 20px rgba(245,158,11,0.3)':'none',
+        animation:urgent?'pulse 2s ease infinite':'none',
+      }}>
+        {fmtCountdown(secs)}
+      </div>
+      <div className="mono" style={{color:'var(--text3)',fontSize:'11px',marginTop:'5px'}}>
+        ET {et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true})}
+      </div>
+    </div>
+  );
+}
+
+function ScField({label,val,c}) {
+  return (
+    <div style={{padding:'7px 10px',background:'var(--s1)',borderRadius:'6px',border:'1px solid var(--border)'}}>
+      <div style={{color:'var(--text4)',fontSize:'9px',fontWeight:600,letterSpacing:'0.1em',textTransform:'uppercase',fontFamily:"'IBM Plex Mono'",marginBottom:'3px'}}>{label}</div>
+      <div style={{color:c||'var(--text2)',fontSize:'12px',lineHeight:'1.5'}}>{val}</div>
+    </div>
+  );
+}
+
+// ─── Morning Brief Tab ────────────────────────────────────────────────────────
+function BriefTab() {
+  const [brief,setBrief] = useState(null);
+  const [loading,setLoading] = useState(false);
+  const [step,setStep] = useState(0);
+  const [err,setErr] = useState('');
+  const [checks,setChecks] = useState(Array(CHECKLIST.length).fill(false));
+  const stepTimer = useRef(null);
+  const [genTime,setGenTime] = useState('');
+
+  useEffect(()=>{ loadBrief().then(b=>{if(b){setBrief(b);setGenTime('today');}});},[]);
+
+  async function generate() {
+    setLoading(true); setBrief(null); setErr(''); setStep(0);
+    stepTimer.current = setInterval(()=>setStep(s=>(s+1)%LOAD_STEPS.length),1400);
+    try {
+      const today = new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+      const sys = `You are a professional US30 (Dow Jones / YM futures) pre-market intelligence system. Today is ${today}. Use web search to get CURRENT live data. Return ONLY valid raw JSON — absolutely no markdown, no backticks, no explanation text. Just the JSON object.`;
+      const prompt = `Generate a complete morning brief for a US30 day trader who trades the market open. Search for:
+1. Current overnight US30/YM futures price and overnight action
+2. Asian and European market performance overnight
+3. Major pre-market news affecting Dow components or macro sentiment
+4. Today's high-impact economic calendar events
+5. Key recent technical levels for US30
+
+Return this exact JSON (raw, no backticks):
+{"bias":"BULLISH","biasStrength":7,"overnightSummary":"2-3 sentences on overnight US30 and global markets","keyDrivers":["driver 1","driver 2","driver 3"],"economicEvents":[{"time":"8:30 AM ET","event":"Name","importance":"HIGH","note":"impact on US30"}],"keyLevels":[{"price":"39450","type":"RESISTANCE","note":"Yesterday high"},{"price":"39100","type":"SUPPORT","note":"Overnight low"}],"scenarios":[{"name":"Gap & Go","direction":"LONG","trigger":"specific entry trigger","target":"pts or price target","invalidation":"what stops this","probability":"HIGH"},{"name":"Gap Fill","direction":"SHORT","trigger":"...","target":"...","invalidation":"...","probability":"MEDIUM"},{"name":"Choppy Open","direction":"WAIT","trigger":"signs of indecision","target":"stay flat","invalidation":"clear breakout either way","probability":"LOW"}],"coachNote":"One direct honest sentence for the trader today"}`;
+      const raw = await callClaude(prompt, true, sys);
+      const data = extractJSON(raw);
+      setBrief(data);
+      setGenTime(new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}));
+      await saveBrief(data);
+    } catch(e){ setErr(`${e.message}`); }
+    clearInterval(stepTimer.current);
+    setLoading(false);
+  }
+
+  const biasColor = brief?.bias==='BULLISH'?'var(--green)':brief?.bias==='BEARISH'?'var(--red)':'var(--accent)';
+  const biasClass = brief?.bias==='BULLISH'?'bias-bull':brief?.bias==='BEARISH'?'bias-bear':'bias-conf';
+  const biasIcon  = brief?.bias==='BULLISH'?'↑ ':brief?.bias==='BEARISH'?'↓ ':'◆ ';
+  const dirColor  = d=>d==='LONG'?'var(--green)':d==='SHORT'?'var(--red)':'var(--text3)';
+  const dirBg     = d=>d==='LONG'?'var(--gdim)':d==='SHORT'?'var(--rdim)':'var(--s4)';
+  const dirIcon   = d=>d==='LONG'?'↑ ':d==='SHORT'?'↓ ':'◆ ';
+  const probClass = p=>p==='HIGH'?'tag-high':p==='MEDIUM'?'tag-medium':'tag-low';
+  const doneCount = checks.filter(Boolean).length;
+  const toggle    = i=>setChecks(c=>{const n=[...c];n[i]=!n[i];return n;});
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:'18px'}}>
+      <div className="card" style={{padding:'28px',background:'linear-gradient(135deg,var(--s1),var(--s2))',position:'relative',overflow:'hidden'}}>
+        <div style={{position:'absolute',top:'-80px',right:'-80px',width:'300px',height:'300px',background:'radial-gradient(circle,rgba(245,158,11,0.06) 0%,transparent 70%)',pointerEvents:'none'}}/>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'24px',position:'relative'}}>
+          <div>
+            <div className="display" style={{fontSize:'38px',color:'var(--text)',lineHeight:1,marginBottom:'6px'}}>US30 MORNING BRIEF</div>
+            <div className="mono" style={{color:'var(--text3)',fontSize:'11px'}}>
+              {new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}
+            </div>
+            {brief&&<div className="mono" style={{color:'var(--text3)',fontSize:'10px',marginTop:'3px'}}>
+              Generated {genTime} · <span style={{color:'var(--accent)',cursor:'pointer'}} onClick={generate}>↺ Refresh</span>
+            </div>}
+          </div>
+          <CountdownWidget/>
+        </div>
+        {!brief&&!loading&&(
+          <div style={{marginTop:'28px',display:'flex',flexDirection:'column',alignItems:'center',gap:'20px',padding:'12px 0'}}>
+            <button className="btn btn-primary" style={{fontSize:'15px',padding:'14px 36px',borderRadius:'10px',boxShadow:'0 4px 20px rgba(245,158,11,0.3)'}} onClick={generate}>
+              ⚡ Generate Today's Brief
+            </button>
+            <div style={{display:'flex',gap:'20px',flexWrap:'wrap',justifyContent:'center'}}>
+              {['Overnight US30 action','Global markets','Economic events','3 scenarios','Key levels','Bias reading'].map((item,i)=>(
+                <div key={i} style={{display:'flex',alignItems:'center',gap:'5px',color:'var(--text3)',fontSize:'12px'}}>
+                  <span style={{color:'var(--green)',fontSize:'10px'}}>✓</span>{item}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {loading&&(
+        <div className="card fade-in" style={{padding:'36px',textAlign:'center'}}>
+          <div style={{position:'relative',display:'inline-flex',alignItems:'center',justifyContent:'center',width:'52px',height:'52px',marginBottom:'20px'}}>
+            <div className="spin" style={{position:'absolute',inset:0,borderRadius:'50%',border:'2px solid transparent',borderTopColor:'var(--accent)'}}/>
+            <span style={{fontSize:'20px'}}>⚡</span>
+          </div>
+          <div style={{color:'var(--text)',fontWeight:500,fontSize:'14px',marginBottom:'8px'}}>Building Your Brief</div>
+          <div className="mono" style={{color:'var(--accent)',fontSize:'11px',marginBottom:'20px',minHeight:'14px'}}>{LOAD_STEPS[step]}</div>
+          <div style={{display:'flex',justifyContent:'center',gap:'6px'}}>
+            {LOAD_STEPS.map((_,i)=>(
+              <div key={i} style={{width:'6px',height:'6px',borderRadius:'50%',background:i===step?'var(--accent)':'var(--s4)',transition:'background 0.3s',boxShadow:i===step?'0 0 6px rgba(245,158,11,0.5)':'none'}}/>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {err&&<div className="card" style={{color:'var(--red)',fontSize:'13px'}}>⚠ {err} <span style={{color:'var(--accent)',cursor:'pointer',marginLeft:'8px'}} onClick={generate}>Try again</span></div>}
+
+      {brief&&!loading&&(<>
+        <div className={`card ${biasClass} bs1`} style={{padding:'24px'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'20px'}}>
+            <div>
+              <div className="lbl" style={{marginBottom:'6px'}}>Opening Bias</div>
+              <div className="display" style={{fontSize:'60px',color:biasColor,lineHeight:1,textShadow:`0 0 40px ${biasColor}35`}}>
+                {biasIcon}{brief.bias}
+              </div>
+            </div>
+            <div style={{flex:1,minWidth:'220px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:'7px'}}>
+                <span className="lbl">Conviction</span>
+                <span className="mono" style={{color:biasColor,fontSize:'12px',fontWeight:600}}>{brief.biasStrength}/10</span>
+              </div>
+              <div style={{height:'8px',background:'var(--s4)',borderRadius:'4px',overflow:'hidden',border:'1px solid var(--border)'}}>
+                <div style={{height:'100%',width:`${brief.biasStrength*10}%`,background:biasColor,borderRadius:'4px',boxShadow:`0 0 10px ${biasColor}50`,transition:'width 1.2s ease'}}/>
+              </div>
+              <div style={{marginTop:'14px',display:'flex',flexWrap:'wrap',gap:'6px'}}>
+                {(brief.keyDrivers||[]).map((d,i)=>(
+                  <span key={i} style={{padding:'4px 11px',borderRadius:'20px',fontSize:'11px',background:'var(--s4)',color:'var(--text2)',border:'1px solid var(--border)'}}>{d}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'14px'}} className="bs2">
+          <div className="card">
+            <div className="lbl" style={{marginBottom:'12px'}}>🌙 Overnight Summary</div>
+            <div style={{color:'var(--text2)',fontSize:'13px',lineHeight:'1.8'}}>{brief.overnightSummary}</div>
+          </div>
+          <div className="card">
+            <div className="lbl" style={{marginBottom:'12px'}}>📅 Today's Catalysts</div>
+            {(!brief.economicEvents||brief.economicEvents.length===0)
+              ?<div style={{color:'var(--text3)',fontSize:'12px'}}>No high-impact events scheduled today.</div>
+              :brief.economicEvents.map((ev,i)=>(
+                <div key={i} className="event-row">
+                  <div style={{flexShrink:0,minWidth:'72px'}}>
+                    <div className="mono" style={{color:'var(--accent)',fontSize:'11px',fontWeight:600}}>{ev.time}</div>
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{display:'flex',alignItems:'center',gap:'7px',marginBottom:'2px',flexWrap:'wrap'}}>
+                      <span style={{color:'var(--text)',fontSize:'13px',fontWeight:500}}>{ev.event}</span>
+                      <span className={`tag tag-${(ev.importance||'LOW').toLowerCase()}`}>{ev.importance}</span>
+                    </div>
+                    <div style={{color:'var(--text3)',fontSize:'11px',lineHeight:'1.4'}}>{ev.note}</div>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+
+        <div className="card bs3">
+          <div className="lbl" style={{marginBottom:'14px'}}>⚑ Key Price Levels</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(210px,1fr))',gap:'8px'}}>
+            {(brief.keyLevels||[]).sort((a,b)=>parseFloat(b.price)-parseFloat(a.price)).map((lv,i)=>(
+              <div key={i} className="level-row">
+                <div style={{
+                  width:'30px',height:'30px',borderRadius:'7px',flexShrink:0,
+                  display:'flex',alignItems:'center',justifyContent:'center',
+                  fontSize:'11px',fontWeight:700,fontFamily:"'IBM Plex Mono'",
+                  background:lv.type==='RESISTANCE'?'var(--rdim)':lv.type==='SUPPORT'?'var(--gdim)':'var(--adim)',
+                  color:lv.type==='RESISTANCE'?'var(--red)':lv.type==='SUPPORT'?'var(--green)':'var(--accent)',
+                }}>{lv.type[0]}</div>
+                <div>
+                  <div className="mono" style={{color:'var(--text)',fontSize:'14px',fontWeight:600}}>
+                    {parseFloat(lv.price).toLocaleString()}
+                  </div>
+                  <div style={{color:'var(--text3)',fontSize:'11px'}}>{lv.note}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bs4">
+          <div className="lbl" style={{marginBottom:'12px'}}>🎯 Opening Scenarios</div>
+          <div style={{display:'flex',gap:'12px',flexWrap:'wrap'}}>
+            {(brief.scenarios||[]).map((sc,i)=>(
+              <div key={i} className="scenario-card">
+                <div style={{marginBottom:'12px'}}>
+                  <div className="display" style={{fontSize:'22px',color:'var(--text)',lineHeight:1,marginBottom:'8px'}}>{sc.name}</div>
+                  <div style={{display:'flex',gap:'6px',flexWrap:'wrap'}}>
+                    <span style={{fontFamily:"'IBM Plex Mono'",fontSize:'11px',fontWeight:700,color:dirColor(sc.direction),background:dirBg(sc.direction),padding:'2px 9px',borderRadius:'5px',letterSpacing:'0.04em'}}>{dirIcon(sc.direction)}{sc.direction}</span>
+                    <span className={`tag ${probClass(sc.probability)}`}>{sc.probability}</span>
+                  </div>
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:'7px'}}>
+                  {sc.trigger    && <ScField label="Trigger"      val={sc.trigger}      c="var(--text2)"/>}
+                  {sc.target&&sc.target!=='stay flat' && <ScField label="Target" val={sc.target} c="var(--green)"/>}
+                  {sc.invalidation && <ScField label="Invalidation" val={sc.invalidation} c="var(--red)"/>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bs5" style={{padding:'18px 20px',borderRadius:'11px',background:'var(--adim2)',border:'1px solid rgba(245,158,11,0.15)',borderLeft:'3px solid var(--accent)',display:'flex',alignItems:'flex-start',gap:'12px'}}>
+          <span style={{fontSize:'22px',flexShrink:0,marginTop:'2px'}}>💬</span>
+          <div>
+            <div className="lbl" style={{marginBottom:'5px'}}>Coach's Note</div>
+            <div style={{color:'var(--text)',fontSize:'14px',lineHeight:'1.75',fontStyle:'italic'}}>"{brief.coachNote}"</div>
+          </div>
+        </div>
+
+        <div className="card bs6">
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px'}}>
+            <div className="lbl">Pre-Trade Checklist</div>
+            <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+              <div style={{height:'4px',width:'80px',background:'var(--s4)',borderRadius:'2px',overflow:'hidden'}}>
+                <div style={{height:'100%',width:`${doneCount/CHECKLIST.length*100}%`,background:'var(--green)',transition:'width 0.3s'}}/>
+              </div>
+              <span className="mono" style={{color:doneCount===CHECKLIST.length?'var(--green)':'var(--text3)',fontSize:'11px'}}>{doneCount}/{CHECKLIST.length}</span>
+              {doneCount===CHECKLIST.length&&<span style={{color:'var(--green)',fontSize:'13px'}}>✓ Ready</span>}
+            </div>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'2px'}}>
+            {CHECKLIST.map((item,i)=>(
+              <div key={i} className={`checklist-item ${checks[i]?'done':''}`} onClick={()=>toggle(i)}>
+                <div style={{width:'18px',height:'18px',borderRadius:'5px',flexShrink:0,border:checks[i]?'none':'1px solid var(--border)',background:checks[i]?'var(--green)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',transition:'all 0.15s',marginTop:'1px'}}>
+                  {checks[i]&&<span style={{color:'var(--bg)',fontSize:'11px',fontWeight:700}}>✓</span>}
+                </div>
+                <span style={{color:checks[i]?'var(--text3)':'var(--text2)',fontSize:'13px',lineHeight:'1.5',textDecoration:checks[i]?'line-through':'none',transition:'all 0.15s'}}>{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+// ─── Research Tab ─────────────────────────────────────────────────────────────
+function ResearchTab() {
+  const [result,setResult]=useState('');
+  const [loading,setLoading]=useState(false);
+  const [query,setQuery]=useState('');
+  const [active,setActive]=useState(null);
+  const [err,setErr]=useState('');
+  async function run(q,idx=null){
+    setLoading(true);setResult('');setErr('');setActive(idx);
+    try{
+      const sys=`You are a professional US30/Dow Jones futures trading research assistant. Use current web search. Format with ## headers and bullet points. Be concise and actionable. End with ## Key Takeaway (1-2 sentences).`;
+      setResult(await callClaude(q,true,sys));
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  }
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:'16px'}}>
+      <div className="card">
+        <div className="lbl" style={{marginBottom:'12px'}}>Quick Research</div>
+        <div style={{display:'flex',flexWrap:'wrap',gap:'8px'}}>
+          {RESEARCH_PRESETS.map((p,i)=>(
+            <button key={i} className={`btn ${active===i?'btn-active':'btn-ghost'}`} onClick={()=>run(p.q,i)} disabled={loading}>
+              {p.icon} {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="card">
+        <div className="lbl" style={{marginBottom:'10px'}}>Custom Query</div>
+        <div style={{display:'flex',gap:'8px'}}>
+          <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="e.g. What is driving the Dow this week?" onKeyDown={e=>e.key==='Enter'&&query.trim()&&run(query)}/>
+          <button className="btn btn-primary" onClick={()=>run(query)} disabled={loading||!query.trim()} style={{flexShrink:0}}>Search</button>
+        </div>
+      </div>
+      {(loading||result||err)&&(
+        <div className="card fade-up">
+          {loading&&(
+            <div style={{display:'flex',flexDirection:'column',gap:'11px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+                <div className="spin" style={{width:'13px',height:'13px',border:'2px solid var(--border)',borderTopColor:'var(--accent)',borderRadius:'50%',flexShrink:0}}/>
+                <span className="mono" style={{color:'var(--text3)',fontSize:'11px'}}>SEARCHING LIVE DATA...</span>
+              </div>
+              {[78,52,88,44,68].map((w,i)=><div key={i} className="shimmer" style={{height:'13px',width:`${w}%`}}/>)}
+            </div>
+          )}
+          {err&&<div style={{color:'var(--red)',fontSize:'13px'}}>⚠ {err}</div>}
+          {result&&!loading&&(
+            <div className="fade-up">
+              <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'16px',paddingBottom:'12px',borderBottom:'1px solid var(--border)'}}>
+                <span style={{width:'7px',height:'7px',background:'var(--green)',borderRadius:'50%',flexShrink:0}}/>
+                <span className="mono" style={{color:'var(--text3)',fontSize:'10px'}}>LIVE — {new Date().toLocaleTimeString()}</span>
+              </div>
+              {fmt(result)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Journal ──────────────────────────────────────────────────────────────────
+const BLANK={date:new Date().toISOString().split('T')[0],time:new Date().toTimeString().slice(0,5),instrument:'YM',direction:'Long',entry:'',exit:'',contracts:'1',pnl:'',setup:'',marketContext:'',notes:'',emotion:6,outcome:'Win'};
+
+function TradeCard({trade}){
+  const [open,setOpen]=useState(false);
+  const pnl=parseFloat(trade.pnl)||0;
+  return(
+    <div className="card" style={{cursor:'pointer',padding:'16px'}} onClick={()=>setOpen(o=>!o)}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'8px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+          <span className="mono" style={{color:'var(--text)',fontSize:'15px',fontWeight:600}}>{trade.instrument}</span>
+          <span className={`tag tag-${trade.direction.toLowerCase()}`}>{trade.direction}</span>
+          <span className={`tag tag-${trade.outcome==='BE'?'be':trade.outcome.toLowerCase()}`}>{trade.outcome}</span>
+          <span className="mono" style={{color:'var(--text3)',fontSize:'11px'}}>{trade.date} {trade.time}</span>
+          <span style={{color:'var(--text3)',fontSize:'12px'}}>{trade.contracts}ct</span>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:'14px'}}>
+          <span className="mono" style={{color:pnl>0?'var(--green)':pnl<0?'var(--red)':'var(--text2)',fontSize:'15px',fontWeight:600}}>{pnl>0?'+':''}{pnl.toFixed(2)}</span>
+          <span style={{color:'var(--text3)',fontSize:'12px'}}>{open?'▲':'▼'}</span>
+        </div>
+      </div>
+      {open&&(
+        <div className="fade-up" style={{marginTop:'16px',paddingTop:'14px',borderTop:'1px solid var(--border)',display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'12px'}}>
+          <div><div className="lbl">Entry → Exit</div><div className="mono" style={{fontSize:'13px',marginTop:'4px'}}>{trade.entry} → {trade.exit}</div></div>
+          <div><div className="lbl">Emotion</div><div className="mono" style={{fontSize:'13px',marginTop:'4px'}}>{trade.emotion}/10</div></div>
+          <div><div className="lbl">Contracts</div><div className="mono" style={{fontSize:'13px',marginTop:'4px'}}>{trade.contracts}</div></div>
+          {trade.setup&&<div style={{gridColumn:'span 3'}}><div className="lbl">Setup</div><div style={{color:'var(--text2)',fontSize:'13px',lineHeight:'1.6',marginTop:'4px'}}>{trade.setup}</div></div>}
+          {trade.marketContext&&<div style={{gridColumn:'span 3'}}><div className="lbl">Context</div><div style={{color:'var(--text2)',fontSize:'13px',lineHeight:'1.6',marginTop:'4px'}}>{trade.marketContext}</div></div>}
+          {trade.notes&&<div style={{gridColumn:'span 3'}}><div className="lbl">Notes</div><div style={{color:'var(--text2)',fontSize:'13px',lineHeight:'1.6',marginTop:'4px'}}>{trade.notes}</div></div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JournalTab({trades,onAdd}){
+  const [form,setForm]=useState(BLANK);
+  const [show,setShow]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  useEffect(()=>{
+    const inst=INSTRUMENTS.find(i=>i.id===form.instrument);
+    if(!inst||!form.entry||!form.exit||!form.contracts)return;
+    const diff=(form.direction==='Long'?1:-1)*(parseFloat(form.exit)-parseFloat(form.entry));
+    const pnl=((diff/inst.tick)*inst.tickVal*parseInt(form.contracts||1)).toFixed(2);
+    set('pnl',pnl);set('outcome',parseFloat(pnl)>0?'Win':parseFloat(pnl)<0?'Loss':'BE');
+  },[form.entry,form.exit,form.contracts,form.instrument,form.direction]);
+  async function save(){if(!form.entry)return;setSaving(true);await onAdd({...form,id:Date.now()});setForm({...BLANK,date:new Date().toISOString().split('T')[0]});setShow(false);setSaving(false);}
+  const F=({label,children})=><div><div className="lbl" style={{marginBottom:'5px'}}>{label}</div>{children}</div>;
+  const Tog=({opts,val,onChange})=>(
+    <div style={{display:'flex',gap:'5px'}}>
+      {opts.map(o=><button key={o} className={`btn ${val===o?'btn-active':'btn-ghost'}`} style={{flex:1,padding:'7px 8px',fontSize:'12px'}} onClick={()=>onChange(o)}>{o}</button>)}
+    </div>
+  );
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:'16px'}}>
+      {!show
+        ?<button className="btn btn-primary" style={{alignSelf:'flex-start'}} onClick={()=>setShow(true)}>+ Log Trade</button>
+        :(
+          <div className="card fade-up">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'20px'}}>
+              <div style={{fontWeight:600,fontSize:'14px'}}>New Trade Entry</div>
+              <button className="btn btn-ghost" style={{padding:'5px 10px',fontSize:'12px'}} onClick={()=>setShow(false)}>✕</button>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'13px'}}>
+              <F label="Date"><input type="date" value={form.date} onChange={e=>set('date',e.target.value)}/></F>
+              <F label="Time"><input type="time" value={form.time} onChange={e=>set('time',e.target.value)}/></F>
+              <F label="Instrument"><select value={form.instrument} onChange={e=>set('instrument',e.target.value)}>{INSTRUMENTS.map(i=><option key={i.id} value={i.id}>{i.id} — {i.name}</option>)}</select></F>
+              <F label="Contracts"><input type="number" min="1" value={form.contracts} onChange={e=>set('contracts',e.target.value)}/></F>
+              <F label="Direction"><Tog opts={['Long','Short']} val={form.direction} onChange={v=>set('direction',v)}/></F>
+              <F label="Outcome"><Tog opts={['Win','Loss','BE']} val={form.outcome} onChange={v=>set('outcome',v)}/></F>
+              <F label="Entry Price"><input type="number" step="1" value={form.entry} onChange={e=>set('entry',e.target.value)} placeholder="0"/></F>
+              <F label="Exit Price"><input type="number" step="1" value={form.exit} onChange={e=>set('exit',e.target.value)} placeholder="0"/></F>
+              <F label="P&L ($)"><input type="number" step="0.01" value={form.pnl} onChange={e=>set('pnl',e.target.value)} placeholder="Auto-calculated"/></F>
+              <F label={`Emotion ${form.emotion}/10`}>
+                <div style={{paddingTop:'4px'}}>
+                  <input type="range" min="1" max="10" value={form.emotion} onChange={e=>set('emotion',parseInt(e.target.value))}/>
+                  <div style={{display:'flex',justifyContent:'space-between',marginTop:'3px'}}>
+                    <span className="mono" style={{color:'var(--text3)',fontSize:'10px'}}>Stressed</span>
+                    <span className="mono" style={{color:'var(--text3)',fontSize:'10px'}}>Calm</span>
+                  </div>
+                </div>
+              </F>
+            </div>
+            <div style={{display:'grid',gap:'13px',marginTop:'13px'}}>
+              <F label="Setup / Entry Reason"><textarea rows={3} value={form.setup} onChange={e=>set('setup',e.target.value)} placeholder="Why did you enter? What was the setup?" style={{resize:'vertical'}}/></F>
+              <F label="Market Context / News"><textarea rows={2} value={form.marketContext} onChange={e=>set('marketContext',e.target.value)} placeholder="What was happening? Any news?" style={{resize:'vertical'}}/></F>
+              <F label="Lessons / Notes"><textarea rows={2} value={form.notes} onChange={e=>set('notes',e.target.value)} placeholder="What would you do differently?" style={{resize:'vertical'}}/></F>
+            </div>
+            <div style={{display:'flex',gap:'8px',marginTop:'18px'}}>
+              <button className="btn btn-primary" onClick={save} disabled={saving||!form.entry}>{saving?'Saving...':'Save Trade'}</button>
+              <button className="btn btn-ghost" onClick={()=>setShow(false)}>Cancel</button>
+            </div>
+          </div>
+        )
+      }
+      {trades.length===0
+        ?<div className="card" style={{textAlign:'center',padding:'44px 24px',color:'var(--text3)'}}>
+            <div style={{fontSize:'36px',marginBottom:'10px'}}>📒</div>
+            <div style={{fontWeight:500,fontSize:'14px',marginBottom:'5px',color:'var(--text2)'}}>No trades logged yet</div>
+            <div style={{fontSize:'12px'}}>Every trade you log becomes data. Start building your edge.</div>
+          </div>
+        :<>
+          <div className="mono" style={{color:'var(--text3)',fontSize:'10px'}}>{trades.length} TRADES LOGGED</div>
+          {trades.map(t=><TradeCard key={t.id} trade={t}/>)}
+        </>
+      }
+    </div>
+  );
+}
+
+// ─── Analysis Tab ─────────────────────────────────────────────────────────────
+function AnalysisTab({trades}){
+  const [result,setResult]=useState('');
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');
+  const n=trades.length;
+  const wins=trades.filter(t=>t.outcome==='Win');
+  const losses=trades.filter(t=>t.outcome==='Loss');
+  const wr=n>0?Math.round(wins.length/n*100):0;
+  const tot=trades.reduce((s,t)=>s+(parseFloat(t.pnl)||0),0);
+  const avgW=wins.length>0?wins.reduce((s,t)=>s+(parseFloat(t.pnl)||0),0)/wins.length:0;
+  const avgL=losses.length>0?losses.reduce((s,t)=>s+(parseFloat(t.pnl)||0),0)/losses.length:0;
+  const rr=avgL!==0?Math.abs(avgW/avgL).toFixed(2):'—';
+  const emoW=wins.length>0?(wins.reduce((s,t)=>s+t.emotion,0)/wins.length).toFixed(1):'—';
+  const emoL=losses.length>0?(losses.reduce((s,t)=>s+t.emotion,0)/losses.length).toFixed(1):'—';
+  const byInst={};
+  trades.forEach(t=>{if(!byInst[t.instrument])byInst[t.instrument]={w:0,l:0,pnl:0,n:0};byInst[t.instrument].n++;byInst[t.instrument].pnl+=parseFloat(t.pnl)||0;if(t.outcome==='Win')byInst[t.instrument].w++;if(t.outcome==='Loss')byInst[t.instrument].l++;});
+  async function analyse(){
+    if(!n)return;setLoading(true);setResult('');setErr('');
+    const j=trades.map(t=>`[${t.date} ${t.time}] ${t.instrument} ${t.direction} ${t.contracts}ct | Entry:${t.entry} Exit:${t.exit} | P&L:$${t.pnl} | ${t.outcome} | Emotion:${t.emotion}/10 | Setup:"${t.setup}" | Context:"${t.marketContext}" | Notes:"${t.notes}"`).join('\n');
+    try{setResult(await callClaude(`My trading journal (${n} trades):\n\n${j}\n\nAnalyse with ## Win/Loss Patterns ## Emotional Patterns ## My Real Edge ## Biggest Weaknesses ## 3 Specific Actions`,false,"You are a professional trading coach. Be specific, honest, and reference actual trades. No generic advice."));}
+    catch(e){setErr(e.message);}
+    setLoading(false);
+  }
+  const S=({label,val,sub,c})=>(
+    <div className="card" style={{flex:1,minWidth:'120px'}}>
+      <div className="lbl" style={{marginBottom:'8px'}}>{label}</div>
+      <div className="display" style={{fontSize:'30px',color:c||'var(--text)',lineHeight:1}}>{val}</div>
+      {sub&&<div style={{color:'var(--text3)',fontSize:'11px',marginTop:'4px'}}>{sub}</div>}
+    </div>
+  );
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:'16px'}}>
+      <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
+        <S label="Trades" val={n} sub={`${wins.length}W · ${losses.length}L`}/>
+        <S label="Win Rate" val={`${wr}%`} c={wr>=50?'var(--green)':'var(--red)'} sub="target >50%"/>
+        <S label="Net P&L" val={`$${tot.toFixed(0)}`} c={tot>=0?'var(--green)':'var(--red)'} sub={`avg $${(n>0?tot/n:0).toFixed(0)}/trade`}/>
+        <S label="Avg Win" val={`$${avgW.toFixed(0)}`} c="var(--green)" sub={`Loss avg $${avgL.toFixed(0)}`}/>
+        <S label="R:R" val={rr} sub="win ÷ loss"/>
+        <S label="Emo W/L" val={`${emoW}/${emoL}`} sub="10=calm"/>
+      </div>
+      {Object.keys(byInst).length>0&&(
+        <div className="card">
+          <div className="lbl" style={{marginBottom:'13px'}}>By Instrument</div>
+          {Object.entries(byInst).map(([inst,d])=>(
+            <div key={inst} style={{display:'flex',alignItems:'center',gap:'12px',padding:'9px 13px',background:'var(--s2)',borderRadius:'7px',border:'1px solid var(--border)',marginBottom:'6px'}}>
+              <span className="mono" style={{fontWeight:600,width:'40px'}}>{inst}</span>
+              <span style={{color:'var(--text3)',fontSize:'12px'}}>{d.n} trades</span>
+              <span style={{color:'var(--green)',fontSize:'12px'}}>{d.w}W</span>
+              <span style={{color:'var(--red)',fontSize:'12px'}}>{d.l}L</span>
+              <span className="mono" style={{marginLeft:'auto',color:d.pnl>=0?'var(--green)':'var(--red)',fontWeight:600}}>{d.pnl>=0?'+':''}${d.pnl.toFixed(0)}</span>
+              <span style={{color:'var(--text3)',fontSize:'12px'}}>{d.n>0?Math.round(d.w/d.n*100):0}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="card">
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'12px',flexWrap:'wrap',marginBottom:result||loading?'16px':'0'}}>
+          <div>
+            <div style={{fontWeight:600,fontSize:'14px',marginBottom:'3px'}}>AI Pattern Analysis</div>
+            <div style={{color:'var(--text3)',fontSize:'12px'}}>Your coach reads the journal and tells you exactly what to fix</div>
+          </div>
+          <button className="btn btn-primary" onClick={analyse} disabled={loading||!n}>{loading?'Analysing...':!n?'No trades yet':'Run Analysis'}</button>
+        </div>
+        {loading&&(<div style={{display:'flex',flexDirection:'column',gap:'10px'}}><div style={{display:'flex',alignItems:'center',gap:'10px'}}><div className="spin" style={{width:'13px',height:'13px',border:'2px solid var(--border)',borderTopColor:'var(--accent)',borderRadius:'50%',flexShrink:0}}/><span className="mono" style={{color:'var(--text3)',fontSize:'11px'}}>READING {n} TRADES...</span></div>{[72,55,82,42,65].map((w,i)=><div key={i} className="shimmer" style={{height:'12px',width:`${w}%`}}/>)}</div>)}
+        {err&&<div style={{color:'var(--red)',fontSize:'13px'}}>{err}</div>}
+        {result&&!loading&&<div className="fade-up" style={{paddingTop:'16px',borderTop:'1px solid var(--border)'}}>{fmt(result)}</div>}
+        {n>0&&n<5&&!result&&!loading&&<div style={{color:'var(--text3)',fontSize:'12px',padding:'11px',background:'var(--s2)',borderRadius:'7px',border:'1px solid var(--border)',marginTop:'12px'}}>💡 Log 20+ trades for meaningful patterns.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Risk Calculator ──────────────────────────────────────────────────────────
+function RiskTab(){
+  const [account,setAccount]=useState('5000');
+  const [riskPct,setRiskPct]=useState('1');
+  const [inst,setInst]=useState('MYM');
+  const [entry,setEntry]=useState('');
+  const [stop,setStop]=useState('');
+  const [dir,setDir]=useState('Long');
+  const [dloss,setDloss]=useState('0');
+  const [maxDL,setMaxDL]=useState('');
+  const instrument=INSTRUMENTS.find(i=>i.id===inst);
+  const acc=parseFloat(account)||0;
+  const riskDollar=(parseFloat(riskPct)/100)*acc;
+  const ent=parseFloat(entry)||0;const stp=parseFloat(stop)||0;const dist=Math.abs(ent-stp);
+  const ticks=instrument&&dist>0?dist/instrument.tick:0;
+  const riskPerCt=instrument?ticks*instrument.tickVal:0;
+  const maxCt=riskPerCt>0?Math.floor(riskDollar/riskPerCt):0;
+  const actualRisk=maxCt*riskPerCt;const actualPct=acc>0?(actualRisk/acc*100).toFixed(2):'0';
+  const dl=parseFloat(dloss)||0;const mdl=parseFloat(maxDL)||(acc*0.02);const remain=mdl-dl;
+  const burnPct=mdl>0?Math.min(100,Math.round(dl/mdl*100)):0;
+  const barColor=burnPct>=100?'var(--red)':burnPct>=75?'var(--accent)':'var(--green)';
+  const R=({label,val,c})=>(<div style={{display:'flex',justifyContent:'space-between',padding:'3px 0'}}><span style={{color:'var(--text3)',fontSize:'12px'}}>{label}</span><span className="mono" style={{color:c||'var(--text)',fontSize:'12px',fontWeight:500}}>{val}</span></div>);
+  const F=({label,children})=><div><div className="lbl" style={{marginBottom:'5px'}}>{label}</div>{children}</div>;
+  return(
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>
+      <div className="card">
+        <div className="lbl" style={{marginBottom:'16px'}}>Position Sizer</div>
+        <div style={{display:'flex',flexDirection:'column',gap:'12px'}}>
+          <F label="Account ($)"><input type="number" value={account} onChange={e=>setAccount(e.target.value)} placeholder="5000"/></F>
+          <F label="Risk Per Trade (%)"><input type="number" step="0.25" value={riskPct} onChange={e=>setRiskPct(e.target.value)} placeholder="1"/></F>
+          <F label="Instrument"><select value={inst} onChange={e=>setInst(e.target.value)}>{INSTRUMENTS.map(i=><option key={i.id} value={i.id}>{i.id} — {i.name}</option>)}</select></F>
+          <F label="Direction"><div style={{display:'flex',gap:'6px'}}>{['Long','Short'].map(d=><button key={d} className={`btn ${dir===d?'btn-active':'btn-ghost'}`} style={{flex:1,padding:'7px'}} onClick={()=>setDir(d)}>{d}</button>)}</div></F>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
+            <F label="Entry"><input type="number" step="1" value={entry} onChange={e=>setEntry(e.target.value)} placeholder="0"/></F>
+            <F label="Stop Loss"><input type="number" step="1" value={stop} onChange={e=>setStop(e.target.value)} placeholder="0"/></F>
+          </div>
+        </div>
+        {ent>0&&stp>0&&(
+          <div className="fade-up card-inner" style={{marginTop:'16px',display:'flex',flexDirection:'column',gap:'8px'}}>
+            <R label="Stop Distance" val={`${dist.toFixed(0)} pts · ${ticks.toFixed(0)} ticks`}/>
+            <R label="Risk/Contract" val={`$${riskPerCt.toFixed(0)}`} c="var(--red)"/>
+            <R label="Risk Budget" val={`$${riskDollar.toFixed(0)} (${riskPct}%)`}/>
+            <div style={{height:'1px',background:'var(--border)',margin:'4px 0'}}/>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <span style={{color:'var(--text)',fontWeight:600}}>Max Contracts</span>
+              <span className="display" style={{fontSize:'40px',color:'var(--accent)',lineHeight:1}}>{maxCt}</span>
+            </div>
+            <R label="Actual at Risk" val={`$${actualRisk.toFixed(0)} (${actualPct}%)`} c="var(--text2)"/>
+            {maxCt===0&&riskPerCt>0&&<div style={{color:'var(--accent)',fontSize:'12px',padding:'8px',background:'var(--adim)',borderRadius:'6px'}}>⚠ Stop too wide. Tighten or increase risk budget.</div>}
+          </div>
+        )}
+        <div style={{marginTop:'14px',padding:'12px',background:'var(--adim2)',border:'1px solid rgba(245,158,11,0.1)',borderRadius:'8px'}}>
+          <div className="lbl" style={{marginBottom:'4px'}}>Sizing Rules</div>
+          <div style={{color:'var(--text3)',fontSize:'12px',lineHeight:'1.6'}}>Risk 0.5–1% per trade. Start with micro contracts. Never size up without 50+ trade proof of edge.</div>
+        </div>
+      </div>
+      <div className="card">
+        <div className="lbl" style={{marginBottom:'16px'}}>Daily Loss Tracker</div>
+        <div style={{display:'flex',flexDirection:'column',gap:'12px'}}>
+          <F label="Max Daily Loss ($)"><input type="number" value={maxDL} onChange={e=>setMaxDL(e.target.value)} placeholder={`${(acc*0.02).toFixed(0)} (2% default)`}/></F>
+          <F label="Loss Today ($)"><input type="number" value={dloss} onChange={e=>setDloss(e.target.value)} placeholder="0"/></F>
+        </div>
+        <div style={{marginTop:'20px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',marginBottom:'7px'}}>
+            <span className="lbl">Daily limit burned</span>
+            <span className="mono" style={{fontSize:'11px',color:barColor}}>{burnPct}%</span>
+          </div>
+          <div style={{background:'var(--s4)',borderRadius:'4px',height:'8px',overflow:'hidden'}}>
+            <div style={{height:'100%',width:`${burnPct}%`,background:barColor,borderRadius:'4px',transition:'width 0.4s'}}/>
+          </div>
+          <div className="card-inner" style={{marginTop:'16px',display:'flex',flexDirection:'column',gap:'8px'}}>
+            <R label="Max Daily Loss" val={`$${mdl.toFixed(0)}`} c="var(--red)"/>
+            <R label="Lost Today" val={`$${dl.toFixed(0)}`} c={dl>0?'var(--red)':'var(--text2)'}/>
+            <div style={{height:'1px',background:'var(--border)',margin:'4px 0'}}/>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <span style={{color:'var(--text)',fontWeight:600}}>Remaining</span>
+              <span className="display" style={{fontSize:remain<=0?'18px':'36px',color:remain<=0?'var(--red)':remain<mdl*0.25?'var(--accent)':'var(--green)',lineHeight:1}}>
+                {remain<=0?'STOP NOW':`$${remain.toFixed(0)}`}
+              </span>
+            </div>
+          </div>
+          {burnPct>=100&&<div className="fade-up" style={{marginTop:'12px',padding:'13px',background:'var(--rdim)',border:'1px solid rgba(240,96,96,0.25)',borderRadius:'8px'}}><div style={{color:'var(--red)',fontWeight:700,marginBottom:'4px'}}>🛑 Daily Limit Reached</div><div style={{color:'var(--text2)',fontSize:'12px'}}>Close all positions. Log off. Come back tomorrow.</div></div>}
+          {burnPct>=75&&burnPct<100&&<div className="fade-up" style={{marginTop:'12px',padding:'11px',background:'var(--adim)',border:'1px solid rgba(245,158,11,0.2)',borderRadius:'8px'}}><div style={{color:'var(--accent)',fontWeight:600,marginBottom:'3px'}}>⚠ 75% Used</div><div style={{color:'var(--text3)',fontSize:'12px'}}>High-conviction only. Consider stopping now.</div></div>}
+        </div>
+        <div style={{marginTop:'14px',padding:'12px',background:'var(--adim2)',border:'1px solid rgba(245,158,11,0.1)',borderRadius:'8px'}}>
+          <div className="lbl" style={{marginBottom:'4px'}}>Daily Rules</div>
+          <div style={{color:'var(--text3)',fontSize:'12px',lineHeight:'1.6'}}>2% max daily loss. After 2 losses, 30-min break. Anger = stop. No exceptions.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+const TABS=[
+  {id:'brief',   label:'Morning Brief',icon:'⚡'},
+  {id:'research',label:'Research',     icon:'🔍'},
+  {id:'journal', label:'Journal',      icon:'📒'},
+  {id:'analysis',label:'Analysis',     icon:'📊'},
+  {id:'risk',    label:'Risk Calc',    icon:'🛡️'},
+];
+
+function App() {
+  const [tab,setTab]=useState('brief');
+  const [trades,setTrades]=useState([]);
+  const [ready,setReady]=useState(false);
+  useEffect(()=>{loadTrades().then(t=>{setTrades(t);setReady(true);});},[]);
+  async function addTrade(t){const u=[t,...trades];setTrades(u);await saveTrades(u);}
+  useEffect(()=>{
+    setTimeout(()=>{
+      const splash=document.getElementById('splash');
+      if(splash){splash.style.opacity='0';setTimeout(()=>splash.remove(),400);}
+    },1200);
+  },[]);
+  return(
+    <div style={{minHeight:'100vh',background:'var(--bg)'}}>
+      <style dangerouslySetInnerHTML={{__html:CSS}}/>
+      <div className="grid-bg" style={{position:'fixed',inset:0,pointerEvents:'none',opacity:0.5,zIndex:0}}/>
+      <div style={{position:'fixed',top:'-150px',right:'-150px',width:'500px',height:'500px',background:'radial-gradient(circle,rgba(245,158,11,0.05) 0%,transparent 70%)',pointerEvents:'none',zIndex:0}}/>
+      <header style={{position:'sticky',top:0,zIndex:100,background:'rgba(3,7,17,0.93)',backdropFilter:'blur(16px)',borderBottom:'1px solid var(--border)',padding:'0 20px'}}>
+        <div style={{maxWidth:'1160px',margin:'0 auto',display:'flex',alignItems:'center',justifyContent:'space-between',height:'54px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+            <div style={{width:'30px',height:'30px',background:'var(--accent)',borderRadius:'7px',display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 0 14px rgba(245,158,11,0.35)'}}>
+              <span style={{fontFamily:"'Bebas Neue',cursive",fontSize:'16px',color:'#030711',letterSpacing:'0.04em'}}>TI</span>
+            </div>
+            <div>
+              <span className="mono" style={{fontSize:'13px',fontWeight:500,color:'var(--text)'}}>TradeIntel<span style={{color:'var(--accent)'}}>_</span></span>
+              <span className="mono" style={{color:'var(--text3)',fontSize:'10px',marginLeft:'7px'}}>US30</span>
+            </div>
+          </div>
+          <nav style={{display:'flex',gap:'2px'}}>
+            {TABS.map(t=>(
+              <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:'6px 13px',borderRadius:'6px',border:'none',cursor:'pointer',fontFamily:"'DM Sans',sans-serif",fontSize:'12px',fontWeight:500,transition:'all 0.15s',background:tab===t.id?'var(--adim)':'transparent',color:tab===t.id?'var(--accent)':'var(--text3)',borderBottom:tab===t.id?'2px solid var(--accent)':'2px solid transparent'}}>{t.icon} {t.label}</button>
+            ))}
+          </nav>
+          <div style={{display:'flex',alignItems:'center',gap:'7px'}}>
+            <span style={{width:'6px',height:'6px',background:isMarketOpen()?'var(--green)':'var(--red)',borderRadius:'50%',boxShadow:isMarketOpen()?'0 0 7px rgba(34,211,160,0.7)':'0 0 7px rgba(240,96,96,0.7)'}}/>
+            <span className="mono" style={{color:'var(--text3)',fontSize:'10px'}}>{isMarketOpen()?'MARKET OPEN':'CLOSED'}<span className="blink" style={{marginLeft:'3px'}}>|</span></span>
+          </div>
+        </div>
+      </header>
+      <main style={{maxWidth:'1160px',margin:'0 auto',padding:'24px 20px',position:'relative',zIndex:1}}>
+        {!ready
+          ?<div style={{display:'flex',flexDirection:'column',gap:'14px'}}>{[1,2,3].map(i=><div key={i} className="shimmer" style={{height:'80px',borderRadius:'12px'}}/>)}</div>
+          :<div className="fade-up" key={tab}>
+              {tab==='brief'    &&<BriefTab/>}
+              {tab==='research' &&<ResearchTab/>}
+              {tab==='journal'  &&<JournalTab trades={trades} onAdd={addTrade}/>}
+              {tab==='analysis' &&<AnalysisTab trades={trades}/>}
+              {tab==='risk'     &&<RiskTab/>}
+            </div>
+        }
+      </main>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+</script>
+</body>
+</html>
